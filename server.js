@@ -52,7 +52,7 @@ const wss = new WebSocketServer({ server });
  */
 const WIDTH = 16;
 const HEIGHT = 16;
-const TICK_RATE = 3.0;
+const TICK_RATE = 1.0;
 
 /**
  * helper functions
@@ -122,8 +122,6 @@ wss.on("connection", (ws) => {
  */
 let ticks = 0;
 function tick() {
-  console.log("tick");
-
   const board = getBoard();
   const data = new Uint8Array(WIDTH * HEIGHT);
 
