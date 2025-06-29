@@ -1,4 +1,5 @@
-ws = new WebSocket('ws://localhost:8080');
+// TODO: use same host as current
+const ws = new WebSocket('ws://localhost:3000');
 
 ws.binaryType = "arraybuffer";
 
@@ -6,7 +7,7 @@ const canvas = document.querySelector('canvas');
 const WIDTH = 16;
 const HEIGHT = 16;
 const SCALE = canvas.width / WIDTH;
-const GAP = 8;
+const GAP = 16;
 const ctx = canvas.getContext("2d");
 
 const colors = [
@@ -24,10 +25,10 @@ ws.addEventListener('message', (event) => {
 
 document.addEventListener('keydown', (event) => {
   switch(event.key) {
-    case "ArrowRight": ws.send(0); break;
-    case "ArrowUp": ws.send(1); break;
-    case "ArrowLeft": ws.send(2); break;
-    case "ArrowDown": ws.send(3); break;
+    case "ArrowRight": case "l": ws.send(0); break;
+    case "ArrowUp": case "k": ws.send(1); break;
+    case "ArrowLeft": case "h": ws.send(2); break;
+    case "ArrowDown": case "j": ws.send(3); break;
   }
 });
 
@@ -44,7 +45,7 @@ function step(timestamp) {
 
       if (value === 255) { // food
         ctx.fillStyle = "#000000";
-        ctx.fillRect(x * SCALE + GAP, y * SCALE + GAP, SCALE - GAP, SCALE - GAP);
+        ctx.fillRect(x * SCALE + GAP / 2, y * SCALE + GAP / 2, SCALE - GAP, SCALE - GAP);
       } else if (value > 0) {
         ctx.fillStyle = colors[value % colors.length];
         ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);

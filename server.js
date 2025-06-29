@@ -1,51 +1,6 @@
-import { WebSocketServer } from "ws";
-import * as fs from "node:fs";
-import * as http from "node:http";
-import * as path from "node:path";
-
-/**
- * Http Server stuff
- */
-const PORT = 8080;
-
-const MIME_TYPES = {
-  default: "application/octet-stream",
-  html: "text/html; charset=UTF-8",
-  js: "text/javascript",
-  css: "text/css",
-  png: "image/png",
-  jpg: "image/jpeg",
-  gif: "image/gif",
-  ico: "image/x-icon",
-  svg: "image/svg+xml",
-};
-
-const STATIC_PATH = path.join(process.cwd(), "./");
-
-const toBool = [() => true, () => false];
-
-const prepareFile = async (url) => {
-  const paths = [STATIC_PATH, url];
-  if (url.endsWith("/")) paths.push("index.html");
-  const filePath = path.join(...paths);
-  const pathTraversal = !filePath.startsWith(STATIC_PATH);
-  const exists = await fs.promises.access(filePath).then(...toBool);
-  const found = !pathTraversal && exists;
-  const streamPath = found ? filePath : `${STATIC_PATH}/404.html`;
-  const ext = path.extname(streamPath).substring(1).toLowerCase();
-  const stream = fs.createReadStream(streamPath);
-  return { found, ext, stream };
-};
-
-const server = http.createServer(async (req, res) => {
-  const file = await prepareFile(req.url);
-  const statusCode = file.found ? 200 : 404;
-  const mimeType = MIME_TYPES[file.ext] || MIME_TYPES.default;
-  res.writeHead(statusCode, { "Content-Type": mimeType });
-  file.stream.pipe(res);
-});
-
-const wss = new WebSocketServer({ server });
+import { serve } from "bun";
+import homepage from "./index.html";
+import { Database } from "bun:sqlite";
 
 /**
  * Game parameters
@@ -68,7 +23,7 @@ const getRandomPosition = (board) => {
   do {
     x = getRandomInt(WIDTH - 1);
     y = getRandomInt(HEIGHT - 1);
-  } while(board[x][y] > 0 );
+  } while (board[x][y] > 0);
 
   return [x, y];
 }
@@ -90,46 +45,40 @@ const DIRS = [
  * Game state
  */
 const players = {};
-let food = getRandomPosition(getBoard());
-let index = 1;
+let data = new Uint8Array(WIDTH * HEIGHT);
+
+const db = new Database("db.sqlite", { create: true });
+db.query('CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY, positions TEXT, direction INTEGER, move INTEGER);').run();
+db.query('CREATE TABLE IF NOT EXISTS food(id INTEGER KEY CHECK (id = 1), x INTEGER NOT NULL, y INTEGER NOT NULL);').run();
+
+db.query('INSERT OR REPLACE INTO food (id, x, y) VALUES (1, $x, $y);').run({ $x: getRandomInt(WIDTH - 1), $y: getRandomInt(HEIGHT - 1) });
+
 
 /**
  * websocket events
  */
-wss.on("connection", (ws) => {
-  ws.index = index;
-  console.log("connected", ws.index);
 
-  // TODO: use getRandomPosition
-  const initialX = getRandomInt(WIDTH - 1);
-  const initialY = getRandomInt(HEIGHT - 1);
+const open = (ws) => {
+  ws.subscribe("players");
+}
 
-  players[ws.index] = {
-    positions: [
-      [initialX, initialY + 0],
-      [initialX, initialY + 1],
-      [initialX, initialY + 2],
-    ],
-    direction: 1,
-  };
+const close = (ws, code, message) => {
+  console.log("deleting", ws.data.id);
+  db.query('DELETE FROM players WHERE id = $id;').run({ $id: ws.data.id });
+}
 
-  index += 1;
+const message = (ws, message) => {
+  const player = db.query('SELECT * from players WHERE id = $id;').get({ $id: ws.data.id });
 
-  ws.on("close", () => {
-    console.log("deleting", ws.index);
-    delete players[ws.index];
-  });
+  // constraint to range [0, 3]
+  const newDirection = parseInt(message) & 3;
 
-  ws.on("message", (data) => {
-    // constraint to range [0, 3]
-    const newDirection = parseInt(data) & 3;
+  // prevent going oposite direction
+  // TODO: go back to move
+  if (((player.direction + newDirection) & 1) == 0) return;
 
-    // prevent going oposite direction
-    if (((players[ws.index].direction + newDirection) & 1) == 0) return;
-
-    players[ws.index].direction = newDirection;
-  });
-});
+  db.query('UPDATE players SET direction = $direction WHERE id = $id;').run({ $direction: newDirection, $id: ws.data.id });
+}
 
 /**
  * Game loop
@@ -137,44 +86,78 @@ wss.on("connection", (ws) => {
 let ticks = 0;
 function tick() {
   const board = getBoard();
-  const data = new Uint8Array(WIDTH * HEIGHT);
+  data = new Uint8Array(WIDTH * HEIGHT);
   let someoneAteTheFood = false;
 
-  Object.entries(players).forEach(([index, player]) => {
+  const players = db.query('SELECT * from players;').all();
+
+  let { x, y } = db.query('SELECT x, y from food WHERE id = 1;').get();
+
+  players.forEach(({ id, positions, direction, move }) => {
+    const pos = JSON.parse(positions);
+
     // move player
-    const head = vecSum(player.positions.at(0), DIRS[player.direction]);
-    player.positions.unshift(head);
+    const head = vecSum(pos.at(0), DIRS[direction]);
+    pos.unshift(head);
 
     // add player to the board
-    player.positions.forEach(([x, y]) => {
-      board[x][y] = index;
-      data[x + y * WIDTH] = parseInt(index);
+    pos.forEach(([x, y]) => {
+      // TODO: remove board
+      board[x][y] = id;
+      data[x + y * WIDTH] = id;
     });
 
     // eat the food
-    if (vecEquals(head, food)) {
+    if (vecEquals(head, [x, y])) {
       someoneAteTheFood = true;
     } else {
       // normally we would always remove the tail, but if we eat the food, we don't as we are one square bigger
-      player.positions.pop();
+      pos.pop();
     }
 
-    players[index] = player
+    db.query('UPDATE players SET positions = $positions WHERE id = $id;').run({ $positions: JSON.stringify(pos), $id: id });
   });
 
   if (someoneAteTheFood) {
-    food = getRandomPosition(board);
+    [x, y] = getRandomPosition(board);
+    console.log(x,y);
+
+    db.query('INSERT OR REPLACE INTO food (id, x, y) VALUES (1, $x, $y);').run({ $x: x, $y: y });
   }
 
-  const [x, y] = food;
   data[x + y * WIDTH] = 255;
 
-  wss.clients.forEach((client) => {
-    client.send(data, { binary: true });
-  });
+  // server might not be defined here?
+  server.publish("players", data);
 
   ticks += 1;
 }
 
 setInterval(tick, 1000 / TICK_RATE);
-server.listen(PORT);
+
+const server = serve({
+  routes: {
+    "/": homepage,
+  },
+  fetch(req, server) {
+    const initialX = getRandomInt(WIDTH - 1);
+    const initialY = getRandomInt(HEIGHT - 1);
+
+    const positions = [
+      [initialX, initialY + 0],
+      [initialX, initialY + 1],
+      [initialX, initialY + 2],
+    ];
+
+    const { lastInsertRowid } = db.query("INSERT INTO players (positions, direction, move) VALUES ($positions, 1, NULL);").run({ $positions: JSON.stringify(positions) });
+
+    server.upgrade(req, { data: { id: lastInsertRowid } });
+  },
+  development: true,
+  websocket: {
+    open,
+    close,
+    message,
+  }
+})
+
