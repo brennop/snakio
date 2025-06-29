@@ -5,7 +5,8 @@ ws.binaryType = "arraybuffer";
 const canvas = document.querySelector('canvas');
 const WIDTH = 16;
 const HEIGHT = 16;
-const scale = canvas.width / WIDTH;
+const SCALE = canvas.width / WIDTH;
+const GAP = 8;
 const ctx = canvas.getContext("2d");
 
 const colors = [
@@ -41,9 +42,12 @@ function step(timestamp) {
     for (let y = 0; y < HEIGHT; y++) {
       const value = data[x + y * WIDTH];
 
-      if (value > 0) {
+      if (value === 255) { // food
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(x * SCALE + GAP, y * SCALE + GAP, SCALE - GAP, SCALE - GAP);
+      } else if (value > 0) {
         ctx.fillStyle = colors[value % colors.length];
-        ctx.fillRect(x * scale, y * scale, scale, scale);
+        ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
       }
     }
   }

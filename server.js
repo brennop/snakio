@@ -52,7 +52,7 @@ const wss = new WebSocketServer({ server });
  */
 const WIDTH = 16;
 const HEIGHT = 16;
-const TICK_RATE = 1.0;
+const TICK_RATE = 5.0; // ticks per seconds
 
 /**
  * helper functions
@@ -63,9 +63,21 @@ function getRandomInt(max) {
   return Math.floor(Math.random() * max);
 }
 
+const getRandomPosition = (board) => {
+  let x, y;
+  do {
+    x = getRandomInt(WIDTH - 1);
+    y = getRandomInt(HEIGHT - 1);
+  } while(board[x][y] > 0 );
+
+  return [x, y];
+}
+
 function vecSum([x1, y1], [x2, y2]) {
   return [(x1 + x2) & (WIDTH - 1), (y1 + y2) & (HEIGHT - 1)];
 }
+
+const vecEquals = ([x1, y1], [x2, y2]) => x1 == x2 && y1 == y2;
 
 const DIRS = [
   [1, 0],
@@ -78,6 +90,7 @@ const DIRS = [
  * Game state
  */
 const players = {};
+let food = getRandomPosition(getBoard());
 let index = 1;
 
 /**
@@ -87,6 +100,7 @@ wss.on("connection", (ws) => {
   ws.index = index;
   console.log("connected", ws.index);
 
+  // TODO: use getRandomPosition
   const initialX = getRandomInt(WIDTH - 1);
   const initialY = getRandomInt(HEIGHT - 1);
 
@@ -124,19 +138,36 @@ let ticks = 0;
 function tick() {
   const board = getBoard();
   const data = new Uint8Array(WIDTH * HEIGHT);
+  let someoneAteTheFood = false;
 
   Object.entries(players).forEach(([index, player]) => {
+    // move player
     const head = vecSum(player.positions.at(0), DIRS[player.direction]);
     player.positions.unshift(head);
-    player.positions.pop();
 
+    // add player to the board
     player.positions.forEach(([x, y]) => {
       board[x][y] = index;
       data[x + y * WIDTH] = parseInt(index);
     });
 
+    // eat the food
+    if (vecEquals(head, food)) {
+      someoneAteTheFood = true;
+    } else {
+      // normally we would always remove the tail, but if we eat the food, we don't as we are one square bigger
+      player.positions.pop();
+    }
+
     players[index] = player
   });
+
+  if (someoneAteTheFood) {
+    food = getRandomPosition(board);
+  }
+
+  const [x, y] = food;
+  data[x + y * WIDTH] = 255;
 
   wss.clients.forEach((client) => {
     client.send(data, { binary: true });
