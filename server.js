@@ -68,10 +68,10 @@ function vecSum([x1, y1], [x2, y2]) {
 }
 
 const DIRS = [
-  [0, 1],
   [1, 0],
   [0, -1],
   [-1, 0],
+  [0, 1],
 ]
 
 /**
@@ -97,7 +97,6 @@ wss.on("connection", (ws) => {
       [initialX, initialY + 2],
     ],
     direction: 1,
-    move: 0
   };
 
   index += 1;
@@ -108,7 +107,13 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("message", (data) => {
-    players[ws.index].move = parseInt(data)
+    // constraint to range [0, 3]
+    const newDirection = parseInt(data) & 3;
+
+    // prevent going oposite direction
+    if (((players[ws.index].direction + newDirection) & 1) == 0) return;
+
+    players[ws.index].direction = newDirection;
   });
 });
 
@@ -123,10 +128,6 @@ function tick() {
   const data = new Uint8Array(WIDTH * HEIGHT);
 
   Object.entries(players).forEach(([index, player]) => {
-    player.direction += player.move 
-    player.direction &= 3;
-    player.move = 0;
-
     const head = vecSum(player.positions.at(0), DIRS[player.direction]);
     player.positions.unshift(head);
     player.positions.pop();

@@ -21,9 +21,10 @@ ws.addEventListener('message', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.keyCode == 37) {
-    ws.send(1);
-  } else if (event.keyCode == 39) {
-    ws.send(-1);
+  switch(event.key) {
+    case "ArrowRight": ws.send(0); break;
+    case "ArrowUp": ws.send(1); break;
+    case "ArrowLeft": ws.send(2); break;
+    case "ArrowDown": ws.send(3); break;
   }
 });
